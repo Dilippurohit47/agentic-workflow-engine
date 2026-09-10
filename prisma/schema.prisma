@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id        Int                    @id @default(autoincrement())
+  content   String
+  embedding Unsupported("vector")?
+}
+
+
+model LlmMemory {
+  id         Int      @id @default(autoincrement())
+  content    String
+  importance Int      @default(1)
+  createdAt  DateTime @default(now())
+
+  embedding  Unsupported("vector")?
+}
+model Task {
+  id          Int        @id @default(autoincrement())
+  instruction String
+  runAt       DateTime
+  status      TaskStatus @default(PENDING)
+  claimedAt   DateTime?
+  claimedBy   String?
+  attempts    Int        @default(0)
+  lastError   String?
+  createdAt   DateTime   @default(now())
+  cron      String?
+  
+  @@index([status, runAt])
+}
+enum TaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model TaskTransaction {
+id Int @id  @default(autoincrement())
+taskId Int 
+runAt DateTime
+status TaskRunStatus 
+createdAt DateTime @default(now())
+updatedAt DateTime?
+@@unique([taskId,runAt])
+}
+
+enum TaskRunStatus {
+  ATTEMPTED
+  CONFIRMED
+}
