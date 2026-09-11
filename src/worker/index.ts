@@ -9,6 +9,7 @@ import { prisma } from "../utils/prisma.js";
 import dotenv from "dotenv";
 
 dotenv.config();
+console.log("token length:", process.env.TELEGRAM_BOT_TOKEN)
 
 
 let shuttingDown = false
@@ -38,7 +39,7 @@ export const scheduler = async () => {
     console.log("database discconnected")
   }
 
-    console.log("finding taks");
+    log.worker(`started finding task`)
     let taskList: Task[] = [];
     const date = new Date();
 
@@ -63,7 +64,10 @@ export const scheduler = async () => {
         LIMIT 1
         FOR UPDATE SKIP LOCKED
         `;
+        log.worker(`poll: found ${rows.length}`)
+
       const taskRunMap = new Map();
+
       const taskTransactions = await tx.taskTransaction.findMany({
         where: {
           OR: rows.map((t) => ({
@@ -87,10 +91,13 @@ export const scheduler = async () => {
             taskUpdates.push({ id: r.id, status: "COMPLETED",claimedAt:r.claimedAt , claimedBy:r.claimedBy});
             return false;
           } else {
-            taskUpdates.push({ id: r.id, status: "RUNNING",completed:false });
+            taskUpdates.push({ id: r.id, status: "RUNNING" });
             return true;
           }
         }
+
+            taskUpdates.push({ id: r.id, status: "RUNNING" });
+
         taskRunUpdates.push({
           taskId: r.id,
           runAt: r.runAt,
@@ -116,6 +123,7 @@ export const scheduler = async () => {
         );
       }
 
+      log.worker(`claimed ${newRows.map(t => t.id).join(",")}`)
       if (taskRunUpdates.length) {
         await Promise.all(
           taskRunUpdates.map((taskRun) =>
@@ -143,11 +151,11 @@ export const scheduler = async () => {
     });
 
     if (!tasks.length) {
-      console.log("Task", taskList);
+      log.worker(`task not found []`);
       return;
     }
 
-    console.log("waiting for 1 sec");
+    log.worker("waiting for 1 sec");
     await new Promise((res) => {
       setTimeout(() => {
         res("");
@@ -155,8 +163,6 @@ export const scheduler = async () => {
     });
 
     taskList.push(...tasks)
-  
-    console.log(taskList)
      await processTask(taskList)
   } catch (error) {
     console.log(error);
@@ -188,19 +194,20 @@ const handleAbort = async(taskList:Task[] | [])=>{
 }
 
 export const processTask = async (taskList: Task[]) => {
-  console.log("task started processing");
+
   try {
     for (let [index,task]  of taskList.entries()) {
       if(shuttingDown){
         console.log("shutting down is true ")
-        let incompleteTask = taskList.slice(index,taskList.length)
-      await  handleAbort(incompleteTask)
+        let incompleteTask = taskList.slice(index,taskList.length) //here end is not included so length is fine isntead length - 1 
+        await  handleAbort(incompleteTask)
         break
       }
 
       try {
         const messages = [...workerPrompt];
-        console.log("processing",task.id)
+      log.worker(`start ${task.id}`)
+      let start = Date.now()
         const result = await runAgent(
           task.instruction,
           messages,
@@ -208,7 +215,7 @@ export const processTask = async (taskList: Task[]) => {
           workerToolInfo,
         );
 
-console.log("done",task.id)
+log.worker(`done ${task.id} (${Date.now() - start}ms)`)
        await prisma.$transaction(async (tx) => {
   await tx.task.update({
     where: {
@@ -223,7 +230,7 @@ console.log("done",task.id)
     where: {
       taskId_runAt: {
         taskId: task.id,
-        runAt: task.runAt,
+        runAt:  task.runAt,
       },
     },
     data: {
@@ -231,9 +238,10 @@ console.log("done",task.id)
     },
   });
 });
-        log.jarvis(result);
+   log.worker(`result : ${result}`)
+
       } catch (error) {
-        console.log("error",error)
+   log.worker(`fail ${task.id} attempt ${task.attempts}: ${error instanceof Error ? error.message : String(error)}`)
         let attempts = task.attempts + 1;
         await prisma.task.update({
           where: {
